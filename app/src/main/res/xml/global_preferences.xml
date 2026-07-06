@@ -221,14 +221,14 @@
             app:summary="@string/speed_test_url_summary"
             app:useSimpleSummaryProvider="true" />
         <EditTextPreference
-            app:defaultValue="10485760"
+            app:defaultValue="52428800"
             app:icon="@drawable/ic_baseline_speed_24"
             app:key="speedTestMaxBytes"
             app:title="@string/speed_test_max_bytes"
             app:summary="@string/speed_test_max_bytes_summary"
             app:useSimpleSummaryProvider="true" />
         <EditTextPreference
-            app:defaultValue="5000"
+            app:defaultValue="20000"
             app:icon="@drawable/ic_baseline_speed_24"
             app:key="speedTestTimeout"
             app:title="@string/speed_test_timeout"

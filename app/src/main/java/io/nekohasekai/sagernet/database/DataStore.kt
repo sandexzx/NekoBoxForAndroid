@@ -158,8 +158,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var appendHttpProxy by configurationStore.boolean(Key.APPEND_HTTP_PROXY)
     var connectionTestURL by configurationStore.string(Key.CONNECTION_TEST_URL) { CONNECTION_TEST_URL }
     var speedTestURL by configurationStore.string(Key.SPEED_TEST_URL) { SPEED_TEST_URL }
-    var speedTestMaxBytes by configurationStore.long(Key.SPEED_TEST_MAX_BYTES) { 10L * 1024 * 1024 }
-    var speedTestTimeout by configurationStore.int(Key.SPEED_TEST_TIMEOUT) { 5000 }
+    var speedTestMaxBytes by configurationStore.long(Key.SPEED_TEST_MAX_BYTES) { 50L * 1024 * 1024 }
+    var speedTestTimeout by configurationStore.int(Key.SPEED_TEST_TIMEOUT) { 20000 }
     var connectionTestConcurrent by configurationStore.int("connectionTestConcurrent") { 5 }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
 
