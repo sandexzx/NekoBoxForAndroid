@@ -1000,15 +1000,32 @@ class ConfigurationFragment @JvmOverloads constructor(
 
     @OptIn(DelicateCoroutinesApi::class)
     fun speedTest() {
+        val group = DataStore.currentGroup()
+        runSpeedTest("[${group.displayName()}] ${getString(R.string.connection_test_speed_test)}") {
+            SagerDatabase.proxyDao.getByGroup(group.id)
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    fun speedTestProfile(profile: ProxyEntity) {
+        runSpeedTest(profile.displayName()) {
+            listOf(ProfileManager.getProfile(profile.id) ?: profile)
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun runSpeedTest(
+        notificationTitle: String,
+        loadProfiles: suspend () -> List<ProxyEntity>,
+    ) {
         if (DataStore.runningTest) return else DataStore.runningTest = true
         val test = TestDialog()
         test.logMode = true
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
-        val group = DataStore.currentGroup()
 
         val mainJob = runOnDefaultDispatcher {
-            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+            val profilesList = loadProfiles()
 
             // Phase 1: parallel ping (latency only)
             test.proxyN = profilesList.size
@@ -1127,7 +1144,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.dialogStatus.set(1)
             test.notification = ConnectionTestNotification(
                 dialog.context,
-                "[${group.displayName()}] ${getString(R.string.connection_test)}"
+                notificationTitle,
             )
             dialog.hide()
         }
@@ -1714,6 +1731,7 @@ class ConfigurationFragment @JvmOverloads constructor(
             val trafficText: TextView = view.findViewById(R.id.traffic_text)
             val selectedView: LinearLayout = view.findViewById(R.id.selected_view)
             val editButton: ImageView = view.findViewById(R.id.edit)
+            val speedTestButton: ImageView = view.findViewById(R.id.speed_test)
             val shareLayout: LinearLayout = view.findViewById(R.id.share)
             val shareLayer: LinearLayout = view.findViewById(R.id.share_layer)
             val shareButton: ImageView = view.findViewById(R.id.shareIcon)
@@ -1838,6 +1856,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                     )
                 }
 
+                speedTestButton.setOnClickListener {
+                    pf.speedTestProfile(proxyEntity)
+                }
+
                 removeButton.setOnClickListener {
                     adapter?.let {
                         val index = it.configurationIdList.indexOf(proxyEntity.id)
@@ -1849,6 +1871,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                 val selectOrChain = select || proxyEntity.type == ProxyEntity.TYPE_CHAIN
                 shareLayout.isGone = selectOrChain
                 editButton.isGone = select
+                speedTestButton.isGone = select
                 removeButton.isGone = select
 
                 proxyEntity.nekoBean?.apply {
@@ -1861,6 +1884,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         selected && DataStore.serviceState.started && DataStore.currentProfile == proxyEntity.id
                     onMainDispatcher {
                         editButton.isEnabled = !started
+                        speedTestButton.isEnabled = !DataStore.runningTest
                         removeButton.isEnabled = !started
                         selectedView.visibility = if (selected) View.VISIBLE else View.INVISIBLE
                     }
