@@ -337,7 +337,7 @@
     <string name="speed_test_max_bytes">Speed test max bytes</string>
     <string name="speed_test_max_bytes_summary">Stop download after this many bytes (default 50 MB)</string>
     <string name="speed_test_timeout">Speed test timeout (ms)</string>
-    <string name="speed_test_timeout_summary">Maximum time per server download test (default 20 s)</string>
+    <string name="speed_test_timeout_summary">Maximum time per server download test (default 8 s)</string>
     <string name="connection_test_domain_not_found">Domain not found</string>
     <string name="connection_test_refused">Connection refused</string>
     <string name="connection_test_unreachable">Unreachable</string>

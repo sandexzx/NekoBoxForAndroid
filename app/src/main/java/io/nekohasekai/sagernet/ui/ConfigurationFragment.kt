@@ -961,28 +961,28 @@ class ConfigurationFragment @JvmOverloads constructor(
 
         val mainJob = runOnDefaultDispatcher {
             val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+
+            // Phase 1: parallel ping (latency only)
             test.proxyN = profilesList.size
             val profiles = ConcurrentLinkedQueue(profilesList)
+            val pingTest = UrlTest(withDownload = false)
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
-                    val urlTest = UrlTest(withDownload = true)
                     while (isActive) {
                         val profile = profiles.poll() ?: break
                         profile.status = 0
+                        profile.downloadSpeed = 0L
 
                         try {
-                            val result = urlTest.doTest(profile)
+                            val result = pingTest.doTest(profile)
                             profile.status = 1
                             profile.ping = result.ping
-                            profile.downloadSpeed = result.downloadSpeed
                         } catch (e: PluginManager.PluginNotFoundException) {
                             profile.status = 2
                             profile.error = e.readableMessage
-                            profile.downloadSpeed = 0L
                         } catch (e: Exception) {
                             profile.status = 3
                             profile.error = e.readableMessage
-                            profile.downloadSpeed = 0L
                         }
 
                         test.update(profile)
@@ -991,6 +991,35 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
 
             testJobs.joinAll()
+
+            if (!isActive) {
+                runOnMainDispatcher { test.cancel() }
+                return@runOnDefaultDispatcher
+            }
+
+            // Phase 2: sequential download (one at a time, ping-passers only)
+            val passers = profilesList.filter { it.status == 1 }
+            test.finishedN.set(0)
+            test.proxyN = passers.size
+            if (passers.isNotEmpty()) {
+                val downloadQueue = ConcurrentLinkedQueue(passers)
+                val downloadTest = UrlTest(withDownload = true)
+                testJobs.clear()
+                testJobs.add(launch(Dispatchers.IO) {
+                    while (isActive) {
+                        val profile = downloadQueue.poll() ?: break
+                        try {
+                            val result = downloadTest.doTest(profile)
+                            profile.ping = result.ping
+                            profile.downloadSpeed = result.downloadSpeed
+                        } catch (e: Exception) {
+                            profile.downloadSpeed = 0L
+                        }
+                        test.update(profile)
+                    }
+                })
+                testJobs.joinAll()
+            }
 
             runOnMainDispatcher {
                 test.cancel()
