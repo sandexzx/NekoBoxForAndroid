@@ -213,6 +213,27 @@
             app:key="connectionTestURL"
             app:title="@string/connection_test_url"
             app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="https://speed.cloudflare.com/__down?bytes=104857600"
+            app:icon="@drawable/ic_baseline_speed_24"
+            app:key="speedTestURL"
+            app:title="@string/speed_test_url"
+            app:summary="@string/speed_test_url_summary"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="10485760"
+            app:icon="@drawable/ic_baseline_speed_24"
+            app:key="speedTestMaxBytes"
+            app:title="@string/speed_test_max_bytes"
+            app:summary="@string/speed_test_max_bytes_summary"
+            app:useSimpleSummaryProvider="true" />
+        <EditTextPreference
+            app:defaultValue="5000"
+            app:icon="@drawable/ic_baseline_speed_24"
+            app:key="speedTestTimeout"
+            app:title="@string/speed_test_timeout"
+            app:summary="@string/speed_test_timeout_summary"
+            app:useSimpleSummaryProvider="true" />
         <SwitchPreference
             app:icon="@drawable/baseline_construction_24"
             app:key="enableClashAPI"

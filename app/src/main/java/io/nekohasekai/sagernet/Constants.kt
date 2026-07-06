@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet
 
 const val CONNECTION_TEST_URL = "http://cp.cloudflare.com/"
+const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=104857600"
 
 object Key {
 
@@ -44,6 +45,9 @@ object Key {
     const val APPEND_HTTP_PROXY = "appendHttpProxy"
 
     const val CONNECTION_TEST_URL = "connectionTestURL"
+    const val SPEED_TEST_URL = "speedTestURL"
+    const val SPEED_TEST_MAX_BYTES = "speedTestMaxBytes"
+    const val SPEED_TEST_TIMEOUT = "speedTestTimeout"
 
     const val NETWORK_CHANGE_RESET_CONNECTIONS = "networkChangeResetConnections"
     const val WAKE_RESET_CONNECTIONS = "wakeResetConnections"

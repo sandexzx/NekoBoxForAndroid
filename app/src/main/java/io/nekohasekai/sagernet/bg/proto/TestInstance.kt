@@ -13,10 +13,18 @@ import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import kotlin.coroutines.suspendCoroutine
 
-class TestInstance(profile: ProxyEntity, val link: String, private val timeout: Int) :
-    BoxInstance(profile) {
+data class TestResult(val ping: Int, val downloadSpeed: Long)
 
-    suspend fun doTest(): Int {
+class TestInstance(
+    profile: ProxyEntity,
+    val link: String,
+    private val timeout: Int,
+    private val downloadLink: String? = null,
+    private val downloadMaxBytes: Long = 0,
+    private val downloadTimeout: Int = 0,
+) : BoxInstance(profile) {
+
+    suspend fun doTest(): TestResult {
         return suspendCoroutine { c ->
             processes = GuardedProcessPool {
                 Logs.w(it)
@@ -31,7 +39,18 @@ class TestInstance(profile: ProxyEntity, val link: String, private val timeout: 
                             // wait for plugin start
                             delay(500)
                         }
-                        c.tryResume(Libcore.urlTest(box, link, timeout))
+                        val ping = Libcore.urlTest(box, link, timeout)
+                        var downloadSpeed = 0L
+                        if (downloadLink != null) {
+                            try {
+                                downloadSpeed = Libcore.urlTestDownload(
+                                    box, downloadLink, downloadMaxBytes, downloadTimeout
+                                )
+                            } catch (e: Exception) {
+                                Logs.w(e)
+                            }
+                        }
+                        c.tryResume(TestResult(ping, downloadSpeed))
                     } catch (e: Exception) {
                         c.tryResumeWithException(e)
                     }

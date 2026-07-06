@@ -7,10 +7,12 @@ import (
 	"io"
 	"libcore/device"
 	"log"
+	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/matsuridayo/libneko/protect_server"
 	"github.com/matsuridayo/libneko/speedtest"
@@ -232,6 +234,56 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 		connectionTracker = mainInstance.v2api.StatsService()
 	}
 	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
+}
+
+func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32) (speed int64, err error) {
+	defer device.DeferPanicToError("box.UrlTestDownload", func(err_ error) { err = err_ })
+
+	var connectionTracker adapter.ConnectionTracker
+	var httpClient *http.Client
+	switch {
+	case i != nil:
+		if i.v2api != nil {
+			connectionTracker = i.v2api.StatsService()
+		}
+		httpClient = boxapi.CreateProxyHttpClient(i.Box, connectionTracker)
+	case mainInstance != nil:
+		if mainInstance.v2api != nil {
+			connectionTracker = mainInstance.v2api.StatsService()
+		}
+		httpClient = boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker)
+	default:
+		httpClient = boxapi.CreateProxyHttpClient(nil, nil)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return 0, err
+	}
+	start := time.Now()
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var reader io.Reader = resp.Body
+	if maxBytes > 0 {
+		reader = io.LimitReader(resp.Body, maxBytes)
+	}
+	n, copyErr := io.Copy(io.Discard, reader)
+	elapsed := time.Since(start).Seconds()
+
+	if n > 0 && elapsed > 0 {
+		return int64(float64(n) / elapsed), nil
+	}
+	if copyErr != nil {
+		return 0, copyErr
+	}
+	return 0, nil
 }
 
 var protectCloser io.Closer

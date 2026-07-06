@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.ui
 
+import android.content.Context
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
@@ -110,10 +111,47 @@ import okhttp3.internal.closeQuietly
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.UnknownHostException
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.ZipInputStream
+
+private const val SPEED_THRESHOLD_GREEN_MBPS = 20.0
+private const val SPEED_THRESHOLD_ORANGE_MBPS = 5.0
+
+private fun formatSpeedMbps(bytesPerSec: Long): String {
+    return String.format(Locale.US, "%.1f Mbps", bytesPerSec * 8 / 1_000_000.0)
+}
+
+private fun speedColor(context: Context, bytesPerSec: Long): Int {
+    val mbps = bytesPerSec * 8 / 1_000_000.0
+    return when {
+        mbps >= SPEED_THRESHOLD_GREEN_MBPS -> context.getColour(R.color.material_green_500)
+        mbps >= SPEED_THRESHOLD_ORANGE_MBPS -> context.getColour(R.color.material_orange_500)
+        else -> context.getColour(R.color.material_red_500)
+    }
+}
+
+private fun buildAvailableStatusText(
+    context: Context, ping: Int, downloadSpeed: Long,
+): CharSequence {
+    val pingText = context.getString(R.string.available, ping)
+    if (downloadSpeed <= 0) return pingText
+    val speedText = " · " + formatSpeedMbps(downloadSpeed)
+    return SpannableStringBuilder(pingText).apply {
+        val start = pingText.length
+        append(speedText)
+        setSpan(
+            ForegroundColorSpan(context.getColour(R.color.material_green_500)),
+            0, pingText.length, SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        setSpan(
+            ForegroundColorSpan(speedColor(context, downloadSpeed)),
+            start, length, SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+    }
+}
 
 class ConfigurationFragment @JvmOverloads constructor(
     val select: Boolean = false, val selectedItem: ProxyEntity? = null, val titleRes: Int = 0
@@ -482,6 +520,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (profile.status != 0) {
                             profile.status = 0
                             profile.ping = 0
+                            profile.downloadSpeed = 0L
                             profile.error = null
                             toClear.add(profile)
                         }
@@ -590,6 +629,10 @@ class ConfigurationFragment @JvmOverloads constructor(
             R.id.action_connection_url_test -> {
                 urlTest()
             }
+
+            R.id.action_connection_speed_test -> {
+                speedTest()
+            }
         }
         return true
     }
@@ -648,8 +691,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                     }
 
                     1 -> {
-                        profileStatusText = getString(R.string.available, profile.ping)
-                        profileStatusColor = context.getColour(R.color.material_green_500)
+                        if (profile.downloadSpeed > 0) {
+                            profileStatusText = null
+                        } else {
+                            profileStatusText = getString(R.string.available, profile.ping)
+                            profileStatusColor = context.getColour(R.color.material_green_500)
+                        }
                     }
 
                     2 -> {
@@ -674,11 +721,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                         SPAN_EXCLUSIVE_EXCLUSIVE
                     )
                     append(" ")
-                    append(
-                        profileStatusText,
-                        ForegroundColorSpan(profileStatusColor),
-                        SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
+                    if (profile.status == 1 && profile.downloadSpeed > 0) {
+                        append(buildAvailableStatusText(context, profile.ping, profile.downloadSpeed))
+                    } else {
+                        append(
+                            profileStatusText,
+                            ForegroundColorSpan(profileStatusColor),
+                            SPAN_EXCLUSIVE_EXCLUSIVE
+                        )
+                    }
                     append("\n")
                 }
 
@@ -853,13 +904,85 @@ class ConfigurationFragment @JvmOverloads constructor(
                         try {
                             val result = urlTest.doTest(profile)
                             profile.status = 1
-                            profile.ping = result
+                            profile.ping = result.ping
                         } catch (e: PluginManager.PluginNotFoundException) {
                             profile.status = 2
                             profile.error = e.readableMessage
                         } catch (e: Exception) {
                             profile.status = 3
                             profile.error = e.readableMessage
+                        }
+
+                        test.update(profile)
+                    }
+                })
+            }
+
+            testJobs.joinAll()
+
+            runOnMainDispatcher {
+                test.cancel()
+            }
+        }
+        test.cancel = {
+            test.dialogStatus.set(2)
+            dialog.dismiss()
+            runOnDefaultDispatcher {
+                mainJob.cancel()
+                testJobs.forEach { it.cancel() }
+                test.results.forEach {
+                    try {
+                        ProfileManager.updateProfile(it)
+                    } catch (e: Exception) {
+                        Logs.w(e)
+                    }
+                }
+                GroupManager.postReload(DataStore.currentGroupId())
+                DataStore.runningTest = false
+            }
+        }
+        test.minimize = {
+            test.dialogStatus.set(1)
+            test.notification = ConnectionTestNotification(
+                dialog.context,
+                "[${group.displayName()}] ${getString(R.string.connection_test)}"
+            )
+            dialog.hide()
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    fun speedTest() {
+        if (DataStore.runningTest) return else DataStore.runningTest = true
+        val test = TestDialog()
+        val dialog = test.builder.show()
+        val testJobs = mutableListOf<Job>()
+        val group = DataStore.currentGroup()
+
+        val mainJob = runOnDefaultDispatcher {
+            val profilesList = SagerDatabase.proxyDao.getByGroup(group.id)
+            test.proxyN = profilesList.size
+            val profiles = ConcurrentLinkedQueue(profilesList)
+            repeat(DataStore.connectionTestConcurrent) {
+                testJobs.add(launch(Dispatchers.IO) {
+                    val urlTest = UrlTest(withDownload = true)
+                    while (isActive) {
+                        val profile = profiles.poll() ?: break
+                        profile.status = 0
+
+                        try {
+                            val result = urlTest.doTest(profile)
+                            profile.status = 1
+                            profile.ping = result.ping
+                            profile.downloadSpeed = result.downloadSpeed
+                        } catch (e: PluginManager.PluginNotFoundException) {
+                            profile.status = 2
+                            profile.error = e.readableMessage
+                            profile.downloadSpeed = 0L
+                        } catch (e: Exception) {
+                            profile.status = 3
+                            profile.error = e.readableMessage
+                            profile.downloadSpeed = 0L
                         }
 
                         test.update(profile)
@@ -1571,8 +1694,14 @@ class ConfigurationFragment @JvmOverloads constructor(
                         profileStatus.text = ""
                     }
                 } else if (proxyEntity.status == 1) {
-                    profileStatus.text = getString(R.string.available, proxyEntity.ping)
-                    profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
+                    if (proxyEntity.downloadSpeed > 0) {
+                        profileStatus.text = buildAvailableStatusText(
+                            requireContext(), proxyEntity.ping, proxyEntity.downloadSpeed
+                        )
+                    } else {
+                        profileStatus.text = getString(R.string.available, proxyEntity.ping)
+                        profileStatus.setTextColor(requireContext().getColour(R.color.material_green_500))
+                    }
                 } else {
                     profileStatus.setTextColor(requireContext().getColour(R.color.material_red_500))
                     if (proxyEntity.status == 2) {

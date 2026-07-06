@@ -331,6 +331,13 @@
     <string name="connection_test_icmp_ping" translatable="false">ICMPing</string>
     <string name="connection_test_icmp_ping_unavailable">ICMPing unavailable</string>
     <string name="connection_test_url_test" translatable="false">URL Test</string>
+    <string name="connection_test_speed_test" translatable="false">Speed test</string>
+    <string name="speed_test_url">Speed test URL</string>
+    <string name="speed_test_url_summary">Download source for speed tests</string>
+    <string name="speed_test_max_bytes">Speed test max bytes</string>
+    <string name="speed_test_max_bytes_summary">Stop download after this many bytes (default 10 MB)</string>
+    <string name="speed_test_timeout">Speed test timeout (ms)</string>
+    <string name="speed_test_timeout_summary">Maximum time per server download test</string>
     <string name="connection_test_domain_not_found">Domain not found</string>
     <string name="connection_test_refused">Connection refused</string>
     <string name="connection_test_unreachable">Unreachable</string>
