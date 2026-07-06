@@ -236,7 +236,15 @@ func UrlTest(i *BoxInstance, link string, timeout int32) (latency int32, err err
 	return speedtest.UrlTest(boxapi.CreateProxyHttpClient(mainInstance.Box, connectionTracker), link, timeout, speedtest.UrlTestStandard_RTT)
 }
 
-func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32) (speed int64, err error) {
+type DownloadTestResult struct {
+	Speed   int64
+	Bytes   int64
+	SetupMs int64
+	BodyMs  int64
+	Status  int32
+}
+
+func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32) (result *DownloadTestResult, err error) {
 	defer device.DeferPanicToError("box.UrlTestDownload", func(err_ error) { err = err_ })
 
 	var connectionTracker adapter.ConnectionTracker
@@ -261,20 +269,18 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	log.Printf("UrlTestDownload start link=%s maxBytes=%d timeout=%dms", link, maxBytes, timeout)
 	doStart := time.Now()
 	resp, err := httpClient.Do(req)
-	setup := time.Since(doStart)
+	setupMs := time.Since(doStart).Milliseconds()
 	if err != nil {
-		log.Printf("UrlTestDownload Do error after %v: %v", setup, err)
-		return 0, err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	log.Printf("UrlTestDownload response status=%d setup=%v", resp.StatusCode, setup)
+	status := int32(resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
+		return &DownloadTestResult{Status: status, SetupMs: setupMs}, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
 
 	start := time.Now()
@@ -283,20 +289,27 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 		reader = io.LimitReader(resp.Body, maxBytes)
 	}
 	n, copyErr := io.Copy(io.Discard, reader)
-	elapsed := time.Since(start).Seconds()
-	bodySpeed := float64(0)
-	if elapsed > 0 {
-		bodySpeed = float64(n) / elapsed
+	bodyMs := time.Since(start).Milliseconds()
+	if bodyMs <= 0 {
+		bodyMs = 1
 	}
-	log.Printf("UrlTestDownload done bytes=%d bodyTime=%.2fs speed=%.0fB/s copyErr=%v", n, elapsed, bodySpeed, copyErr)
+	speed := n * 1000 / bodyMs
 
-	if n > 0 && elapsed > 0 {
-		return int64(bodySpeed), nil
+	result = &DownloadTestResult{
+		Speed:   speed,
+		Bytes:   n,
+		SetupMs: setupMs,
+		BodyMs:  bodyMs,
+		Status:  status,
+	}
+
+	if n > 0 {
+		return result, nil
 	}
 	if copyErr != nil {
-		return 0, copyErr
+		return result, copyErr
 	}
-	return 0, nil
+	return result, nil
 }
 
 var protectCloser io.Closer

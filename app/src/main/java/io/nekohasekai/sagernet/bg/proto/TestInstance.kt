@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.bg.proto
 
+import android.util.Log
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.GuardedProcessPool
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -13,6 +14,8 @@ import kotlinx.coroutines.delay
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import kotlin.coroutines.suspendCoroutine
+
+private const val SPEED_TEST_LOG_TAG = "SpeedTest"
 
 data class TestResult(val ping: Int, val downloadSpeed: Long)
 
@@ -41,19 +44,31 @@ class TestInstance(
                             delay(500)
                         }
                         val ping = Libcore.urlTest(box, link, timeout)
-                        Logs.w("SpeedTest[${profile.displayName()}] ping=$ping ms")
+                        Log.w(SPEED_TEST_LOG_TAG, "[${profile.displayName()}] ping=$ping ms")
                         var downloadSpeed = 0L
                         if (downloadLink != null && ping > 0) {
                             try {
-                                downloadSpeed = Libcore.urlTestDownload(
+                                val result = Libcore.urlTestDownload(
                                     box, downloadLink, downloadMaxBytes, downloadTimeout
                                 )
-                                Logs.w("SpeedTest[${profile.displayName()}] downloadSpeed=$downloadSpeed B/s")
+                                downloadSpeed = result.speed
+                                Log.w(
+                                    SPEED_TEST_LOG_TAG,
+                                    "[${profile.displayName()}] download status=${result.status} " +
+                                        "setupMs=${result.setupMs} bodyMs=${result.bodyMs} " +
+                                        "bytes=${result.bytes} speed=${result.speed} B/s"
+                                )
                             } catch (e: Exception) {
-                                Logs.w("SpeedTest[${profile.displayName()}] download failed: ${e.readableMessage}")
+                                Log.w(
+                                    SPEED_TEST_LOG_TAG,
+                                    "[${profile.displayName()}] download failed: ${e.readableMessage}"
+                                )
                             }
                         } else if (downloadLink != null) {
-                            Logs.w("SpeedTest[${profile.displayName()}] download skipped (ping=$ping)")
+                            Log.w(
+                                SPEED_TEST_LOG_TAG,
+                                "[${profile.displayName()}] download skipped (ping=$ping)"
+                            )
                         }
                         c.tryResume(TestResult(ping, downloadSpeed))
                     } catch (e: Exception) {
