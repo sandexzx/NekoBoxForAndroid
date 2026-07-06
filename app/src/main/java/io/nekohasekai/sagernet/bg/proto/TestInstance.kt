@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.bg.GuardedProcessPool
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.fmt.buildConfig
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.tryResume
 import io.nekohasekai.sagernet.ktx.tryResumeWithException
@@ -40,15 +41,19 @@ class TestInstance(
                             delay(500)
                         }
                         val ping = Libcore.urlTest(box, link, timeout)
+                        Logs.w("SpeedTest[${profile.displayName()}] ping=$ping ms")
                         var downloadSpeed = 0L
-                        if (downloadLink != null) {
+                        if (downloadLink != null && ping > 0) {
                             try {
                                 downloadSpeed = Libcore.urlTestDownload(
                                     box, downloadLink, downloadMaxBytes, downloadTimeout
                                 )
+                                Logs.w("SpeedTest[${profile.displayName()}] downloadSpeed=$downloadSpeed B/s")
                             } catch (e: Exception) {
-                                Logs.w(e)
+                                Logs.w("SpeedTest[${profile.displayName()}] download failed: ${e.readableMessage}")
                             }
+                        } else if (downloadLink != null) {
+                            Logs.w("SpeedTest[${profile.displayName()}] download skipped (ping=$ping)")
                         }
                         c.tryResume(TestResult(ping, downloadSpeed))
                     } catch (e: Exception) {

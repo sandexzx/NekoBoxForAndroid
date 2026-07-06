@@ -263,11 +263,16 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 	if err != nil {
 		return 0, err
 	}
+	log.Printf("UrlTestDownload start link=%s maxBytes=%d timeout=%dms", link, maxBytes, timeout)
+	doStart := time.Now()
 	resp, err := httpClient.Do(req)
+	setup := time.Since(doStart)
 	if err != nil {
+		log.Printf("UrlTestDownload Do error after %v: %v", setup, err)
 		return 0, err
 	}
 	defer resp.Body.Close()
+	log.Printf("UrlTestDownload response status=%d setup=%v", resp.StatusCode, setup)
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
 	}
@@ -279,9 +284,14 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 	}
 	n, copyErr := io.Copy(io.Discard, reader)
 	elapsed := time.Since(start).Seconds()
+	bodySpeed := float64(0)
+	if elapsed > 0 {
+		bodySpeed = float64(n) / elapsed
+	}
+	log.Printf("UrlTestDownload done bytes=%d bodyTime=%.2fs speed=%.0fB/s copyErr=%v", n, elapsed, bodySpeed, copyErr)
 
 	if n > 0 && elapsed > 0 {
-		return int64(float64(n) / elapsed), nil
+		return int64(bodySpeed), nil
 	}
 	if copyErr != nil {
 		return 0, copyErr
