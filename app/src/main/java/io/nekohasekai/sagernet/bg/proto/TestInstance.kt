@@ -11,13 +11,20 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ktx.tryResume
 import io.nekohasekai.sagernet.ktx.tryResumeWithException
 import kotlinx.coroutines.delay
+import libcore.DownloadRetryListener
 import libcore.Libcore
 import moe.matsuri.nb4a.net.LocalResolverImpl
 import kotlin.coroutines.suspendCoroutine
 
 private const val SPEED_TEST_LOG_TAG = "SpeedTest"
 
-data class TestResult(val ping: Int, val downloadSpeed: Long)
+data class TestResult(
+    val ping: Int,
+    val downloadSpeed: Long = 0,
+    val downloadBytes: Long = 0,
+    val downloadMs: Long = 0,
+    val downloadError: String? = null,
+)
 
 class TestInstance(
     profile: ProxyEntity,
@@ -26,6 +33,7 @@ class TestInstance(
     private val downloadLink: String? = null,
     private val downloadMaxBytes: Long = 0,
     private val downloadTimeout: Int = 0,
+    private val downloadRetryListener: DownloadRetryListener? = null,
 ) : BoxInstance(profile) {
 
     suspend fun doTest(): TestResult {
@@ -46,12 +54,18 @@ class TestInstance(
                         val ping = Libcore.urlTest(box, link, timeout)
                         Log.w(SPEED_TEST_LOG_TAG, "[${profile.displayName()}] ping=$ping ms")
                         var downloadSpeed = 0L
+                        var downloadBytes = 0L
+                        var downloadMs = 0L
+                        var downloadError: String? = null
                         if (downloadLink != null && ping > 0) {
                             try {
                                 val result = Libcore.urlTestDownload(
-                                    box, downloadLink, downloadMaxBytes, downloadTimeout
+                                    box, downloadLink, downloadMaxBytes, downloadTimeout,
+                                    downloadRetryListener,
                                 )
                                 downloadSpeed = result.speed
+                                downloadBytes = result.bytes
+                                downloadMs = result.bodyMs
                                 Log.w(
                                     SPEED_TEST_LOG_TAG,
                                     "[${profile.displayName()}] download status=${result.status} " +
@@ -59,9 +73,10 @@ class TestInstance(
                                         "bytes=${result.bytes} speed=${result.speed} B/s"
                                 )
                             } catch (e: Exception) {
+                                downloadError = e.readableMessage
                                 Log.w(
                                     SPEED_TEST_LOG_TAG,
-                                    "[${profile.displayName()}] download failed: ${e.readableMessage}"
+                                    "[${profile.displayName()}] download failed: $downloadError"
                                 )
                             }
                         } else if (downloadLink != null) {
@@ -70,7 +85,9 @@ class TestInstance(
                                 "[${profile.displayName()}] download skipped (ping=$ping)"
                             )
                         }
-                        c.tryResume(TestResult(ping, downloadSpeed))
+                        c.tryResume(
+                            TestResult(ping, downloadSpeed, downloadBytes, downloadMs, downloadError)
+                        )
                     } catch (e: Exception) {
                         c.tryResumeWithException(e)
                     }

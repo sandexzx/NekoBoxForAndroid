@@ -93,6 +93,8 @@ import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
+import libcore.DownloadRetryListener
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -122,6 +124,26 @@ private const val SPEED_THRESHOLD_ORANGE_MBPS = 5.0
 
 private fun formatSpeedMbps(bytesPerSec: Long): String {
     return String.format(Locale.US, "%.1f Mbps", bytesPerSec * 8 / 1_000_000.0)
+}
+
+private fun formatDownloadLogLine(name: String, speed: Long, bytes: Long, ms: Long): String {
+    val mbps = String.format(Locale.US, "%.1f", speed * 8 / 1_000_000.0)
+    val mb = String.format(Locale.US, "%.1f", bytes / 1_000_000.0)
+    val sec = String.format(Locale.US, "%.1f", ms / 1000.0)
+    return "[$name] ↓ $mbps Mbps ($mb MB / ${sec}s)"
+}
+
+private fun pingLogLine(profile: ProxyEntity): String {
+    val name = profile.displayName()
+    return when (profile.status) {
+        1 -> "[$name] ping=${profile.ping} ms"
+        2 -> "[$name] ${profile.error ?: SagerNet.application.getString(R.string.unavailable)}"
+        else -> {
+            val err = profile.error ?: ""
+            val msg = Protocols.genFriendlyMsg(err)
+            "[$name] ${if (msg != err) msg else SagerNet.application.getString(R.string.unavailable)}"
+        }
+    }
 }
 
 private fun speedColor(context: Context, bytesPerSec: Long): Int {
@@ -648,6 +670,13 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
             .setCancelable(false)
 
+        init {
+            val logHeight = (240 * resources.displayMetrics.density).toInt()
+            binding.logScroll.layoutParams = binding.logScroll.layoutParams.apply {
+                height = logHeight
+            }
+        }
+
         lateinit var cancel: () -> Unit
         lateinit var minimize: () -> Unit
 
@@ -657,6 +686,20 @@ class ConfigurationFragment @JvmOverloads constructor(
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
         var proxyN = 0
         val finishedN = AtomicInteger(0)
+        var logMode = false
+        private val logBuffer = StringBuilder()
+
+        fun log(line: String) {
+            runOnMainDispatcher {
+                if (dialogStatus.get() >= 2) return@runOnMainDispatcher
+                if (!isAdded) return@runOnMainDispatcher
+                logBuffer.append(line).append('\n')
+                binding.nowTesting.text = logBuffer.toString()
+                binding.logScroll.post {
+                    binding.logScroll.fullScroll(View.FOCUS_DOWN)
+                }
+            }
+        }
 
         fun update(profile: ProxyEntity) {
             if (dialogStatus.get() != 2) {
@@ -674,7 +717,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (status >= 1) return@runOnMainDispatcher
                 if (!isAdded) return@runOnMainDispatcher
 
-                // refresh dialog
+                binding.progress.text = "$progress / $proxyN"
+                if (logMode) return@runOnMainDispatcher
+
+                // refresh dialog (pingTest)
 
                 var profileStatusText: String? = null
                 var profileStatusColor = 0
@@ -734,7 +780,6 @@ class ConfigurationFragment @JvmOverloads constructor(
                 }
 
                 binding.nowTesting.text = text
-                binding.progress.text = "$progress / $proxyN"
             }
         }
 
@@ -886,6 +931,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     fun urlTest() {
         if (DataStore.runningTest) return else DataStore.runningTest = true
         val test = TestDialog()
+        test.logMode = true
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
         val group = DataStore.currentGroup()
@@ -913,6 +959,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             profile.error = e.readableMessage
                         }
 
+                        test.log(pingLogLine(profile))
                         test.update(profile)
                     }
                 })
@@ -955,6 +1002,7 @@ class ConfigurationFragment @JvmOverloads constructor(
     fun speedTest() {
         if (DataStore.runningTest) return else DataStore.runningTest = true
         val test = TestDialog()
+        test.logMode = true
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
         val group = DataStore.currentGroup()
@@ -985,6 +1033,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             profile.error = e.readableMessage
                         }
 
+                        test.log(pingLogLine(profile))
                         test.update(profile)
                     }
                 })
@@ -1003,17 +1052,49 @@ class ConfigurationFragment @JvmOverloads constructor(
             test.proxyN = passers.size
             if (passers.isNotEmpty()) {
                 val downloadQueue = ConcurrentLinkedQueue(passers)
-                val downloadTest = UrlTest(withDownload = true)
                 testJobs.clear()
                 testJobs.add(launch(Dispatchers.IO) {
+                    var firstDownload = true
                     while (isActive) {
                         val profile = downloadQueue.poll() ?: break
+                        if (!firstDownload) delay(500)
+                        firstDownload = false
+
+                        val retryListener = object : DownloadRetryListener {
+                            override fun onRetry(attempt: Int, maxAttempts: Int) {
+                                test.log(
+                                    "[${profile.displayName()}] HTTP 429 — retry $attempt/$maxAttempts…"
+                                )
+                            }
+                        }
+                        val downloadTest = UrlTest(
+                            withDownload = true,
+                            downloadRetryListener = retryListener,
+                        )
                         try {
                             val result = downloadTest.doTest(profile)
                             profile.ping = result.ping
                             profile.downloadSpeed = result.downloadSpeed
+                            when {
+                                result.downloadSpeed > 0 -> test.log(
+                                    formatDownloadLogLine(
+                                        profile.displayName(),
+                                        result.downloadSpeed,
+                                        result.downloadBytes,
+                                        result.downloadMs,
+                                    )
+                                )
+                                result.downloadError != null -> {
+                                    profile.downloadSpeed = 0L
+                                    test.log(
+                                        "[${profile.displayName()}] failed: ${result.downloadError}"
+                                    )
+                                }
+                                else -> test.log("[${profile.displayName()}] failed: no data")
+                            }
                         } catch (e: Exception) {
                             profile.downloadSpeed = 0L
+                            test.log("[${profile.displayName()}] failed: ${e.readableMessage}")
                         }
                         test.update(profile)
                     }

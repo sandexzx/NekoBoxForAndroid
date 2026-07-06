@@ -8,6 +8,7 @@ import (
 	"libcore/device"
 	"log"
 	"net/http"
+	"strconv"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -244,7 +245,25 @@ type DownloadTestResult struct {
 	Status  int32
 }
 
-func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32) (result *DownloadTestResult, err error) {
+type DownloadRetryListener interface {
+	OnRetry(attempt int32, maxAttempts int32)
+}
+
+const maxDownloadAttempts = 3
+
+func downloadRetryDelay(resp *http.Response, attempt int) time.Duration {
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if sec, err := strconv.ParseInt(ra, 10, 64); err == nil && sec > 0 {
+			if sec > 5 {
+				sec = 5
+			}
+			return time.Duration(sec) * time.Second
+		}
+	}
+	return time.Duration(attempt) * time.Second
+}
+
+func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32, listener DownloadRetryListener) (result *DownloadTestResult, err error) {
 	defer device.DeferPanicToError("box.UrlTestDownload", func(err_ error) { err = err_ })
 
 	var connectionTracker adapter.ConnectionTracker
@@ -264,52 +283,77 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 		httpClient = boxapi.CreateProxyHttpClient(nil, nil)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
-	defer cancel()
+	for attempt := 1; attempt <= maxDownloadAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
-	if err != nil {
-		return nil, err
-	}
-	doStart := time.Now()
-	resp, err := httpClient.Do(req)
-	setupMs := time.Since(doStart).Milliseconds()
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	status := int32(resp.StatusCode)
-	if resp.StatusCode != http.StatusOK {
-		return &DownloadTestResult{Status: status, SetupMs: setupMs}, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
-	}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 
-	start := time.Now()
-	var reader io.Reader = resp.Body
-	if maxBytes > 0 {
-		reader = io.LimitReader(resp.Body, maxBytes)
-	}
-	n, copyErr := io.Copy(io.Discard, reader)
-	bodyMs := time.Since(start).Milliseconds()
-	if bodyMs <= 0 {
-		bodyMs = 1
-	}
-	speed := n * 1000 / bodyMs
+		doStart := time.Now()
+		resp, err := httpClient.Do(req)
+		setupMs := time.Since(doStart).Milliseconds()
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 
-	result = &DownloadTestResult{
-		Speed:   speed,
-		Bytes:   n,
-		SetupMs: setupMs,
-		BodyMs:  bodyMs,
-		Status:  status,
-	}
+		status := int32(resp.StatusCode)
+		if resp.StatusCode == http.StatusTooManyRequests {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			cancel()
+			if attempt < maxDownloadAttempts {
+				if listener != nil {
+					listener.OnRetry(int32(attempt), maxDownloadAttempts)
+				}
+				time.Sleep(downloadRetryDelay(resp, attempt))
+				continue
+			}
+			return &DownloadTestResult{Status: status, SetupMs: setupMs}, fmt.Errorf("download failed: HTTP 429")
+		}
 
-	if n > 0 {
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			cancel()
+			return &DownloadTestResult{Status: status, SetupMs: setupMs}, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
+		}
+
+		start := time.Now()
+		var reader io.Reader = resp.Body
+		if maxBytes > 0 {
+			reader = io.LimitReader(resp.Body, maxBytes)
+		}
+		n, copyErr := io.Copy(io.Discard, reader)
+		resp.Body.Close()
+		cancel()
+
+		bodyMs := time.Since(start).Milliseconds()
+		if bodyMs <= 0 {
+			bodyMs = 1
+		}
+		speed := n * 1000 / bodyMs
+
+		result = &DownloadTestResult{
+			Speed:   speed,
+			Bytes:   n,
+			SetupMs: setupMs,
+			BodyMs:  bodyMs,
+			Status:  status,
+		}
+
+		if n > 0 {
+			return result, nil
+		}
+		if copyErr != nil {
+			return result, copyErr
+		}
 		return result, nil
 	}
-	if copyErr != nil {
-		return result, copyErr
-	}
-	return result, nil
+
+	return nil, fmt.Errorf("download failed: HTTP 429")
 }
 
 var protectCloser io.Closer
