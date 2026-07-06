@@ -263,13 +263,16 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32)
 	if err != nil {
 		return 0, err
 	}
-	start := time.Now()
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("download failed: HTTP %d", resp.StatusCode)
+	}
 
+	start := time.Now()
 	var reader io.Reader = resp.Body
 	if maxBytes > 0 {
 		reader = io.LimitReader(resp.Body, maxBytes)
