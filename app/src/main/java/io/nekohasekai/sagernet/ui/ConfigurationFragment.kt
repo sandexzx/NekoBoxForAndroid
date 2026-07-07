@@ -4,13 +4,18 @@ import android.content.Context
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
 import android.text.format.Formatter
 import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
+import androidx.annotation.StringRes
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MenuItem
@@ -91,6 +96,7 @@ import io.nekohasekai.sagernet.ui.profile.TrojanSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.TuicSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
+import io.nekohasekai.sagernet.widget.LogLineAdapter
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
 import io.nekohasekai.sagernet.bg.proto.TestFallbackListener
@@ -127,26 +133,163 @@ private fun formatSpeedMbps(bytesPerSec: Long): String {
     return String.format(Locale.US, "%.1f Mbps", bytesPerSec * 8 / 1_000_000.0)
 }
 
-private fun formatDownloadLogLine(
-    name: String, speed: Long, bytes: Long, ms: Long, endpointUrl: String? = null,
-): String {
+private fun buildPingLogLine(context: Context, profile: ProxyEntity): CharSequence {
+    val name = profile.displayName()
+    val primary = context.getColorAttr(R.attr.primaryOrTextPrimary)
+    return SpannableStringBuilder().apply {
+        append(name)
+        setSpan(ForegroundColorSpan(primary), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        setSpan(StyleSpan(Typeface.BOLD), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        when (profile.status) {
+            1 -> {
+                append(" · ping=")
+                val start = length
+                append("${profile.ping} ms")
+                setSpan(
+                    ForegroundColorSpan(context.getColour(R.color.material_green_500)),
+                    start, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+                setSpan(TypefaceSpan("monospace"), start, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            2 -> {
+                append(" · ")
+                val start = length
+                val text = profile.error ?: context.getString(R.string.unavailable)
+                append(text)
+                setSpan(
+                    ForegroundColorSpan(context.getColour(R.color.material_red_500)),
+                    start, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+            else -> {
+                val err = profile.error ?: ""
+                val msg = Protocols.genFriendlyMsg(err)
+                val text = if (msg != err) msg else context.getString(R.string.unavailable)
+                append(" · ")
+                val start = length
+                append(text)
+                setSpan(
+                    ForegroundColorSpan(context.getColour(R.color.material_red_500)),
+                    start, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+                )
+            }
+        }
+        append(" · ")
+        val protoStart = length
+        append(profile.displayType())
+        setSpan(
+            ForegroundColorSpan(context.getProtocolColor(profile.type)),
+            protoStart, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+}
+
+private fun buildDownloadLogLine(
+    context: Context,
+    name: String,
+    speed: Long,
+    bytes: Long,
+    ms: Long,
+    endpointUrl: String? = null,
+): CharSequence {
+    val primary = context.getColorAttr(R.attr.primaryOrTextPrimary)
+    val secondary = context.getColorAttr(android.R.attr.textColorSecondary)
     val mbps = String.format(Locale.US, "%.1f", speed * 8 / 1_000_000.0)
     val mb = String.format(Locale.US, "%.1f", bytes / 1_000_000.0)
     val sec = String.format(Locale.US, "%.1f", ms / 1000.0)
     val via = endpointUrl?.let { " via $it" }.orEmpty()
-    return "[$name] ↓ $mbps Mbps$via ($mb MB / ${sec}s)"
+    return SpannableStringBuilder().apply {
+        append(name)
+        setSpan(ForegroundColorSpan(primary), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        setSpan(StyleSpan(Typeface.BOLD), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        append(" ↓ ")
+        val speedStart = length
+        append("$mbps Mbps")
+        setSpan(
+            ForegroundColorSpan(speedColor(context, speed)),
+            speedStart, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        setSpan(TypefaceSpan("monospace"), speedStart, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        val detail = "$via ($mb MB / ${sec}s)"
+        append(detail)
+        setSpan(
+            ForegroundColorSpan(secondary),
+            length - detail.length, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+        setSpan(
+            TypefaceSpan("monospace"),
+            length - detail.length, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
 }
 
-private fun pingLogLine(profile: ProxyEntity): String {
+private fun buildPlainLogLine(context: Context, message: String): CharSequence {
+    return SpannableString(message).apply {
+        setSpan(
+            ForegroundColorSpan(context.getColorAttr(android.R.attr.textColorSecondary)),
+            0, length, SPAN_EXCLUSIVE_EXCLUSIVE,
+        )
+    }
+}
+
+private fun buildPingHeaderLabel(context: Context, profile: ProxyEntity): CharSequence {
     val name = profile.displayName()
-    return when (profile.status) {
-        1 -> "[$name] ping=${profile.ping} ms"
-        2 -> "[$name] ${profile.error ?: SagerNet.application.getString(R.string.unavailable)}"
+    val primary = context.getColorAttr(R.attr.primaryOrTextPrimary)
+    val secondary = context.getColorAttr(android.R.attr.textColorSecondary)
+    var statusText: String
+    var statusColor: Int
+    when (profile.status) {
+        -1 -> {
+            statusText = profile.error ?: ""
+            statusColor = secondary
+        }
+        0 -> {
+            statusText = context.getString(R.string.connection_test_testing)
+            statusColor = secondary
+        }
+        1 -> {
+            if (profile.downloadSpeed > 0) {
+                return buildAvailableStatusText(context, profile.ping, profile.downloadSpeed)
+            }
+            statusText = context.getString(R.string.available, profile.ping)
+            statusColor = context.getColour(R.color.material_green_500)
+        }
+        2 -> {
+            statusText = profile.error ?: context.getString(R.string.unavailable)
+            statusColor = context.getColour(R.color.material_red_500)
+        }
         else -> {
             val err = profile.error ?: ""
             val msg = Protocols.genFriendlyMsg(err)
-            "[$name] ${if (msg != err) msg else SagerNet.application.getString(R.string.unavailable)}"
+            statusText = if (msg != err) msg else context.getString(R.string.unavailable)
+            statusColor = context.getColour(R.color.material_red_500)
         }
+    }
+    return SpannableStringBuilder().apply {
+        append(name)
+        setSpan(ForegroundColorSpan(primary), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        setSpan(StyleSpan(Typeface.BOLD), 0, name.length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        append(" · ")
+        val start = length
+        append(statusText)
+        setSpan(ForegroundColorSpan(statusColor), start, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (profile.status == 1 && profile.ping > 0) {
+            setSpan(TypefaceSpan("monospace"), start, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+}
+
+private fun buildProgressCounter(context: Context, progress: Int, total: Int): CharSequence {
+    val numerator = "$progress"
+    val denominator = " / $total"
+    val primary = context.getColorAttr(R.attr.primaryOrTextPrimary)
+    val secondary = context.getColorAttr(android.R.attr.textColorSecondary)
+    return SpannableStringBuilder(numerator).apply {
+        setSpan(ForegroundColorSpan(primary), 0, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        setSpan(StyleSpan(Typeface.BOLD), 0, length, SPAN_EXCLUSIVE_EXCLUSIVE)
+        val start = length
+        append(denominator)
+        setSpan(ForegroundColorSpan(secondary), start, length, SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 }
 
@@ -663,9 +806,13 @@ class ConfigurationFragment @JvmOverloads constructor(
         return true
     }
 
-    inner class TestDialog {
+    inner class TestDialog(
+        @StringRes titleRes: Int,
+        private val showLog: Boolean = false,
+    ) {
         val binding = LayoutProgressListBinding.inflate(layoutInflater)
         val builder = MaterialAlertDialogBuilder(requireContext()).setView(binding.root)
+            .setTitle(titleRes)
             .setPositiveButton(R.string.minimize) { _, _ ->
                 minimize()
             }
@@ -674,12 +821,8 @@ class ConfigurationFragment @JvmOverloads constructor(
             }
             .setCancelable(false)
 
-        init {
-            val logHeight = (240 * resources.displayMetrics.density).toInt()
-            binding.logScroll.layoutParams = binding.logScroll.layoutParams.apply {
-                height = logHeight
-            }
-        }
+        private val logAdapter = LogLineAdapter()
+        private var completed = false
 
         lateinit var cancel: () -> Unit
         lateinit var minimize: () -> Unit
@@ -690,19 +833,65 @@ class ConfigurationFragment @JvmOverloads constructor(
         val results: MutableSet<ProxyEntity> = ConcurrentHashMap.newKeySet()
         var proxyN = 0
         val finishedN = AtomicInteger(0)
-        var logMode = false
-        private val logBuffer = StringBuilder()
 
-        fun log(line: String) {
+        init {
+            binding.logCard.isGone = !showLog
+            if (showLog) {
+                binding.logList.layoutManager = LinearLayoutManager(requireContext())
+                binding.logList.adapter = logAdapter
+            }
+            updateProgressBar(0)
+        }
+
+        fun setOperationLabel(text: CharSequence) {
+            runOnMainDispatcher {
+                if (dialogStatus.get() >= 2 || !isAdded) return@runOnMainDispatcher
+                binding.operationLabel.text = text
+            }
+        }
+
+        fun resetProgress(total: Int, label: CharSequence? = null) {
+            finishedN.set(0)
+            proxyN = total
+            completed = false
+            runOnMainDispatcher {
+                val context = context ?: return@runOnMainDispatcher
+                if (dialogStatus.get() >= 2 || !isAdded) return@runOnMainDispatcher
+                binding.progressCircular.isVisible = true
+                binding.progressComplete.isGone = true
+                label?.let { binding.operationLabel.text = it }
+                binding.progressCounter.text = buildProgressCounter(context, 0, total)
+                updateProgressBar(0)
+            }
+        }
+
+        fun log(line: CharSequence) {
             runOnMainDispatcher {
                 if (dialogStatus.get() >= 2) return@runOnMainDispatcher
-                if (!isAdded) return@runOnMainDispatcher
-                logBuffer.append(line).append('\n')
-                binding.nowTesting.text = logBuffer.toString()
-                binding.logScroll.post {
-                    binding.logScroll.fullScroll(View.FOCUS_DOWN)
-                }
+                if (!isAdded || !showLog) return@runOnMainDispatcher
+                logAdapter.append(line)
+                val position = logAdapter.itemCount - 1
+                binding.logList.smoothScrollToPosition(position)
             }
+        }
+
+        private fun updateProgressBar(progress: Int) {
+            if (proxyN <= 0) {
+                binding.progressLinear.isIndeterminate = true
+                return
+            }
+            binding.progressLinear.isIndeterminate = false
+            binding.progressLinear.max = 100
+            binding.progressLinear.setProgressCompat(progress * 100 / proxyN, true)
+        }
+
+        private fun showCompletion() {
+            if (completed) return
+            completed = true
+            binding.progressCircular.isGone = true
+            binding.progressComplete.isVisible = true
+            binding.progressLinear.isIndeterminate = false
+            binding.progressLinear.setProgressCompat(100, true)
         }
 
         fun update(profile: ProxyEntity) {
@@ -721,69 +910,15 @@ class ConfigurationFragment @JvmOverloads constructor(
                 if (status >= 1) return@runOnMainDispatcher
                 if (!isAdded) return@runOnMainDispatcher
 
-                binding.progress.text = "$progress / $proxyN"
-                if (logMode) return@runOnMainDispatcher
-
-                // refresh dialog (pingTest)
-
-                var profileStatusText: String? = null
-                var profileStatusColor = 0
-
-                when (profile.status) {
-                    -1 -> {
-                        profileStatusText = profile.error
-                        profileStatusColor = context.getColorAttr(android.R.attr.textColorSecondary)
-                    }
-
-                    0 -> {
-                        profileStatusText = getString(R.string.connection_test_testing)
-                        profileStatusColor = context.getColorAttr(android.R.attr.textColorSecondary)
-                    }
-
-                    1 -> {
-                        if (profile.downloadSpeed > 0) {
-                            profileStatusText = null
-                        } else {
-                            profileStatusText = getString(R.string.available, profile.ping)
-                            profileStatusColor = context.getColour(R.color.material_green_500)
-                        }
-                    }
-
-                    2 -> {
-                        profileStatusText = profile.error
-                        profileStatusColor = context.getColour(R.color.material_red_500)
-                    }
-
-                    3 -> {
-                        val err = profile.error ?: ""
-                        val msg = Protocols.genFriendlyMsg(err)
-                        profileStatusText = if (msg != err) msg else getString(R.string.unavailable)
-                        profileStatusColor = context.getColour(R.color.material_red_500)
-                    }
+                binding.progressCounter.text = buildProgressCounter(context, progress, proxyN)
+                updateProgressBar(progress)
+                if (progress >= proxyN) {
+                    showCompletion()
                 }
 
-                val text = SpannableStringBuilder().apply {
-                    append("\n" + profile.displayName())
-                    append("\n")
-                    append(
-                        profile.displayType(),
-                        ForegroundColorSpan(context.getProtocolColor(profile.type)),
-                        SPAN_EXCLUSIVE_EXCLUSIVE
-                    )
-                    append(" ")
-                    if (profile.status == 1 && profile.downloadSpeed > 0) {
-                        append(buildAvailableStatusText(context, profile.ping, profile.downloadSpeed))
-                    } else {
-                        append(
-                            profileStatusText,
-                            ForegroundColorSpan(profileStatusColor),
-                            SPAN_EXCLUSIVE_EXCLUSIVE
-                        )
-                    }
-                    append("\n")
+                if (!showLog) {
+                    binding.operationLabel.text = buildPingHeaderLabel(context, profile)
                 }
-
-                binding.nowTesting.text = text
             }
         }
 
@@ -793,7 +928,10 @@ class ConfigurationFragment @JvmOverloads constructor(
     @Suppress("EXPERIMENTAL_API_USAGE")
     fun pingTest(icmpPing: Boolean) {
         if (DataStore.runningTest) return else DataStore.runningTest = true
-        val test = TestDialog()
+        val test = TestDialog(
+            if (icmpPing) R.string.connection_test_icmp_ping else R.string.connection_test_tcp_ping,
+            showLog = false,
+        )
         val dialog = test.builder.show()
         val testJobs = mutableListOf<Job>()
         val group = DataStore.currentGroup()
@@ -934,9 +1072,9 @@ class ConfigurationFragment @JvmOverloads constructor(
     @OptIn(DelicateCoroutinesApi::class)
     fun urlTest() {
         if (DataStore.runningTest) return else DataStore.runningTest = true
-        val test = TestDialog()
-        test.logMode = true
+        val test = TestDialog(R.string.connection_test_url_test, showLog = true)
         val dialog = test.builder.show()
+        test.setOperationLabel(getString(R.string.connection_test_testing))
         val testJobs = mutableListOf<Job>()
         val group = DataStore.currentGroup()
 
@@ -968,7 +1106,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             profile.error = e.readableMessage
                         }
 
-                        test.log(pingLogLine(profile))
+                        test.log(buildPingLogLine(app, profile))
                         test.update(profile)
                     }
                 })
@@ -1010,27 +1148,34 @@ class ConfigurationFragment @JvmOverloads constructor(
     @OptIn(DelicateCoroutinesApi::class)
     fun speedTest() {
         val group = DataStore.currentGroup()
-        runSpeedTest("[${group.displayName()}] ${getString(R.string.connection_test_speed_test)}") {
+        runSpeedTest(
+            R.string.connection_test_speed_test,
+            "[${group.displayName()}] ${getString(R.string.connection_test_speed_test)}",
+        ) {
             SagerDatabase.proxyDao.getByGroup(group.id)
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     fun speedTestProfile(profile: ProxyEntity) {
-        runSpeedTest(profile.displayName()) {
+        runSpeedTest(
+            R.string.profile_speed_test,
+            profile.displayName(),
+        ) {
             listOf(ProfileManager.getProfile(profile.id) ?: profile)
         }
     }
 
     @OptIn(DelicateCoroutinesApi::class)
     private fun runSpeedTest(
+        @StringRes dialogTitleRes: Int,
         notificationTitle: String,
         loadProfiles: suspend () -> List<ProxyEntity>,
     ) {
         if (DataStore.runningTest) return else DataStore.runningTest = true
-        val test = TestDialog()
-        test.logMode = true
+        val test = TestDialog(dialogTitleRes, showLog = true)
         val dialog = test.builder.show()
+        test.setOperationLabel(getString(R.string.connection_test_testing))
         val testJobs = mutableListOf<Job>()
 
         val mainJob = runOnDefaultDispatcher {
@@ -1043,7 +1188,12 @@ class ConfigurationFragment @JvmOverloads constructor(
                 withDownload = false,
                 fallbackListener = object : TestFallbackListener {
                     override fun onFallback(endpointLabel: String, reason: String) {
-                        test.log("Ping failed on $endpointLabel ($reason) — trying fallback…")
+                        test.log(
+                            buildPlainLogLine(
+                                app,
+                                "Ping failed on $endpointLabel ($reason) — trying fallback…",
+                            )
+                        )
                     }
                 },
             )
@@ -1071,7 +1221,7 @@ class ConfigurationFragment @JvmOverloads constructor(
                             profile.error = e.readableMessage
                         }
 
-                        test.log(pingLogLine(profile))
+                        test.log(buildPingLogLine(app, profile))
                         test.update(profile)
                     }
                 })
@@ -1086,9 +1236,11 @@ class ConfigurationFragment @JvmOverloads constructor(
 
             // Phase 2: sequential download (one at a time, ping-passers only)
             val passers = profilesList.filter { it.status == 1 }
-            test.finishedN.set(0)
-            test.proxyN = passers.size
             if (passers.isNotEmpty()) {
+                test.resetProgress(
+                    passers.size,
+                    "${getString(R.string.download)}…",
+                )
                 val downloadQueue = ConcurrentLinkedQueue(passers)
                 testJobs.clear()
                 testJobs.add(launch(Dispatchers.IO) {
@@ -1101,7 +1253,10 @@ class ConfigurationFragment @JvmOverloads constructor(
                         val fallbackListener = object : TestFallbackListener {
                             override fun onFallback(endpointLabel: String, reason: String) {
                                 test.log(
-                                    "[${profile.displayName()}] $endpointLabel: $reason → next"
+                                    buildPlainLogLine(
+                                        app,
+                                        "[${profile.displayName()}] $endpointLabel: $reason → next",
+                                    )
                                 )
                             }
                         }
@@ -1115,7 +1270,8 @@ class ConfigurationFragment @JvmOverloads constructor(
                             profile.downloadSpeed = result.downloadSpeed
                             when {
                                 result.downloadSpeed > 0 -> test.log(
-                                    formatDownloadLogLine(
+                                    buildDownloadLogLine(
+                                        app,
                                         profile.displayName(),
                                         result.downloadSpeed,
                                         result.downloadBytes,
@@ -1126,15 +1282,26 @@ class ConfigurationFragment @JvmOverloads constructor(
                                 result.downloadError != null -> {
                                     profile.downloadSpeed = 0L
                                     test.log(
-                                        "[${profile.displayName()}] ↓ failed: ${result.downloadError}"
+                                        buildPlainLogLine(
+                                            app,
+                                            "[${profile.displayName()}] ↓ failed: ${result.downloadError}",
+                                        )
                                     )
                                 }
-                                else -> test.log("[${profile.displayName()}] ↓ failed")
+                                else -> test.log(
+                                    buildPlainLogLine(
+                                        app,
+                                        "[${profile.displayName()}] ↓ failed",
+                                    )
+                                )
                             }
                         } catch (e: Exception) {
                             profile.downloadSpeed = 0L
                             test.log(
-                                "[${profile.displayName()}] ↓ failed: ${shortTestError(e.readableMessage)}"
+                                buildPlainLogLine(
+                                    app,
+                                    "[${profile.displayName()}] ↓ failed: ${shortTestError(e.readableMessage)}",
+                                )
                             )
                         }
                         test.update(profile)
