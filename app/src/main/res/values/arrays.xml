@@ -530,4 +530,32 @@
         <item>@string/sniff_override</item>
     </string-array>
 
+    <string-array name="connection_test_provider_entries">
+        <item>Google (HTTPS)</item>
+        <item>Google (HTTP)</item>
+        <item>Cloudflare</item>
+        <item>Apple</item>
+        <item>Google Clients</item>
+    </string-array>
+    <string-array name="connection_test_provider_values">
+        <item>gstatic_https</item>
+        <item>gstatic_http</item>
+        <item>cloudflare</item>
+        <item>apple</item>
+        <item>google_clients</item>
+    </string-array>
+
+    <string-array name="speed_test_provider_entries">
+        <item>Tele2</item>
+        <item>Hetzner</item>
+        <item>OVH Roubaix</item>
+        <item>OVH Gravelines</item>
+    </string-array>
+    <string-array name="speed_test_provider_values">
+        <item>tele2</item>
+        <item>hetzner</item>
+        <item>ovh_rbx</item>
+        <item>ovh_gra</item>
+    </string-array>
+
 </resources>

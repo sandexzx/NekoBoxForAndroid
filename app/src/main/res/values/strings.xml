@@ -99,6 +99,10 @@
     <string name="require_transproxy">Enable Transproxy Inbound</string>
     <string name="transproxy_mode">Transproxy Mode</string>
     <string name="connection_test_url">Connection Test URL</string>
+    <string name="connection_test_provider">Connection test provider</string>
+    <string name="connection_test_provider_summary">Primary endpoint for latency tests; one fallback on failure</string>
+    <string name="connection_test_concurrent">Connection test concurrency</string>
+    <string name="connection_test_concurrent_summary">Number of parallel URL tests (default 5)</string>
     <!-- proxy category -->
     <string name="profile_name">Profile Name</string>
     <string name="server_address">Server</string>
@@ -335,8 +339,10 @@
     <string name="profile_speed_test">Speed test this server</string>
     <string name="speed_test_url">Speed test URL</string>
     <string name="speed_test_url_summary">Download source for speed tests</string>
+    <string name="speed_test_provider">Speed test provider</string>
+    <string name="speed_test_provider_summary">Primary download source; other providers used on failure</string>
     <string name="speed_test_max_bytes">Speed test max bytes</string>
-    <string name="speed_test_max_bytes_summary">Stop download after this many bytes (default 50 MB)</string>
+    <string name="speed_test_max_bytes_summary">Stop download after this many bytes (default 100 MB)</string>
     <string name="speed_test_timeout">Speed test timeout (ms)</string>
     <string name="speed_test_timeout_summary">Maximum time per server download test (default 8 s)</string>
     <string name="connection_test_domain_not_found">Domain not found</string>

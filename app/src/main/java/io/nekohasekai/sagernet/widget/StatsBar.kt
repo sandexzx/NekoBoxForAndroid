@@ -13,6 +13,7 @@ import androidx.lifecycle.whenStarted
 import com.google.android.material.bottomappbar.BottomAppBar
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.TestEndpoints
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.MainActivity
@@ -133,7 +134,9 @@ class StatsBar @JvmOverloads constructor(
                     isEnabled = true
                     setStatus(
                         app.getString(
-                            if (DataStore.connectionTestURL.startsWith("https://")) {
+                            if (TestEndpoints.resolveConnectionProvider(DataStore.connectionTestProvider)
+                                    .url.startsWith("https://")
+                            ) {
                                 R.string.connection_test_available
                             } else {
                                 R.string.connection_test_available_http

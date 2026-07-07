@@ -93,7 +93,8 @@ import io.nekohasekai.sagernet.ui.profile.VMessSettingsActivity
 import io.nekohasekai.sagernet.ui.profile.WireGuardSettingsActivity
 import io.nekohasekai.sagernet.widget.QRCodeDialog
 import io.nekohasekai.sagernet.widget.UndoSnackbarManager
-import libcore.DownloadRetryListener
+import io.nekohasekai.sagernet.bg.proto.TestFallbackListener
+import io.nekohasekai.sagernet.bg.proto.shortTestError
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
@@ -126,11 +127,14 @@ private fun formatSpeedMbps(bytesPerSec: Long): String {
     return String.format(Locale.US, "%.1f Mbps", bytesPerSec * 8 / 1_000_000.0)
 }
 
-private fun formatDownloadLogLine(name: String, speed: Long, bytes: Long, ms: Long): String {
+private fun formatDownloadLogLine(
+    name: String, speed: Long, bytes: Long, ms: Long, endpointUrl: String? = null,
+): String {
     val mbps = String.format(Locale.US, "%.1f", speed * 8 / 1_000_000.0)
     val mb = String.format(Locale.US, "%.1f", bytes / 1_000_000.0)
     val sec = String.format(Locale.US, "%.1f", ms / 1000.0)
-    return "[$name] ↓ $mbps Mbps ($mb MB / ${sec}s)"
+    val via = endpointUrl?.let { " via $it" }.orEmpty()
+    return "[$name] ↓ $mbps Mbps$via ($mb MB / ${sec}s)"
 }
 
 private fun pingLogLine(profile: ProxyEntity): String {
@@ -949,8 +953,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                         try {
                             val result = urlTest.doTest(profile)
-                            profile.status = 1
-                            profile.ping = result.ping
+                            if (result.ping > 0) {
+                                profile.status = 1
+                                profile.ping = result.ping
+                            } else {
+                                profile.status = 3
+                                profile.error = "connection test failed"
+                            }
                         } catch (e: PluginManager.PluginNotFoundException) {
                             profile.status = 2
                             profile.error = e.readableMessage
@@ -1030,7 +1039,14 @@ class ConfigurationFragment @JvmOverloads constructor(
             // Phase 1: parallel ping (latency only)
             test.proxyN = profilesList.size
             val profiles = ConcurrentLinkedQueue(profilesList)
-            val pingTest = UrlTest(withDownload = false)
+            val pingTest = UrlTest(
+                withDownload = false,
+                fallbackListener = object : TestFallbackListener {
+                    override fun onFallback(endpointLabel: String, reason: String) {
+                        test.log("Ping failed on $endpointLabel ($reason) — trying fallback…")
+                    }
+                },
+            )
             repeat(DataStore.connectionTestConcurrent) {
                 testJobs.add(launch(Dispatchers.IO) {
                     while (isActive) {
@@ -1040,8 +1056,13 @@ class ConfigurationFragment @JvmOverloads constructor(
 
                         try {
                             val result = pingTest.doTest(profile)
-                            profile.status = 1
-                            profile.ping = result.ping
+                            if (result.ping > 0) {
+                                profile.status = 1
+                                profile.ping = result.ping
+                            } else {
+                                profile.status = 3
+                                profile.error = "connection test failed"
+                            }
                         } catch (e: PluginManager.PluginNotFoundException) {
                             profile.status = 2
                             profile.error = e.readableMessage
@@ -1077,16 +1098,16 @@ class ConfigurationFragment @JvmOverloads constructor(
                         if (!firstDownload) delay(500)
                         firstDownload = false
 
-                        val retryListener = object : DownloadRetryListener {
-                            override fun onRetry(attempt: Int, maxAttempts: Int) {
+                        val fallbackListener = object : TestFallbackListener {
+                            override fun onFallback(endpointLabel: String, reason: String) {
                                 test.log(
-                                    "[${profile.displayName()}] HTTP 429 — retry $attempt/$maxAttempts…"
+                                    "[${profile.displayName()}] $endpointLabel: $reason → next"
                                 )
                             }
                         }
                         val downloadTest = UrlTest(
                             withDownload = true,
-                            downloadRetryListener = retryListener,
+                            fallbackListener = fallbackListener,
                         )
                         try {
                             val result = downloadTest.doTest(profile)
@@ -1099,19 +1120,22 @@ class ConfigurationFragment @JvmOverloads constructor(
                                         result.downloadSpeed,
                                         result.downloadBytes,
                                         result.downloadMs,
+                                        result.downloadEndpoint?.url,
                                     )
                                 )
                                 result.downloadError != null -> {
                                     profile.downloadSpeed = 0L
                                     test.log(
-                                        "[${profile.displayName()}] failed: ${result.downloadError}"
+                                        "[${profile.displayName()}] ↓ failed: ${result.downloadError}"
                                     )
                                 }
-                                else -> test.log("[${profile.displayName()}] failed: no data")
+                                else -> test.log("[${profile.displayName()}] ↓ failed")
                             }
                         } catch (e: Exception) {
                             profile.downloadSpeed = 0L
-                            test.log("[${profile.displayName()}] failed: ${e.readableMessage}")
+                            test.log(
+                                "[${profile.displayName()}] ↓ failed: ${shortTestError(e.readableMessage)}"
+                            )
                         }
                         test.update(profile)
                     }

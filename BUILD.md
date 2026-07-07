@@ -155,7 +155,7 @@ javap -classpath classes.jar libcore.Libcore | rg urlTest
 Ожидается, среди прочего:
 
 - `urlTest(...)`
-- `urlTestDownload(...) → DownloadTestResult`
+- `urlTestDownload(..., maxAttempts) → DownloadTestResult`
 
 ### Теги сборки Go
 
@@ -267,17 +267,24 @@ adb install -r app/build/outputs/apk/fdroid/debug/NekoBox-*-arm64-v8a-debug.apk
 | Слой | Файлы |
 |------|--------|
 | Native | `libcore/box.go` — `UrlTest`, `UrlTestDownload`, `DownloadTestResult` |
-| Kotlin | `TestInstance.kt`, `UrlTest.kt`, `ConfigurationFragment.kt` |
+| Kotlin | `TestEndpoints.kt`, `TestInstance.kt`, `UrlTest.kt`, `ConfigurationFragment.kt` |
 | БД | `ProxyEntity.downloadSpeed`, Room v7 |
-| Настройки | `DataStore.speedTestURL`, `speedTestMaxBytes`, `speedTestTimeout` |
+| Настройки | `DataStore.connectionTestProvider`, `speedTestProvider`, `speedTestMaxBytes`, `speedTestTimeout` |
 
 Дефолты (если настройки в приложении не менялись):
 
-- URL: `https://speed.cloudflare.com/__down?bytes=52428800` (50 MiB)
-- Max bytes: 50 MiB
-- Timeout: 20000 ms
+- Connection test provider: `gstatic_https` (Google `generate_204`), fallback — один следующий провайдер
+- Speed test provider: `tele2` (`http://speedtest.tele2.net/100MB.zip`), fallback — все остальные по очереди
+- Max bytes: 100 MiB
+- Timeout: 8000 ms (в UI prefs default 20000 ms для новых установок через XML)
 
-**Важно:** настройки speed test **сохраняются** в preferences. После смены дефолтов в коде проверьте значения в приложении: Settings → Speed test URL / max bytes / timeout.
+**Важно:** настройки **сохраняются** в preferences. После обновления проверьте: Settings → Connection test provider / Speed test provider / max bytes / timeout.
+
+### Провайдеры
+
+**Ping (connection test):** Google HTTPS/HTTP, Cloudflare, Apple, Google Clients.
+
+**Speed test (download):** Tele2, Hetzner, OVH Roubaix, OVH Gravelines — только 100 MB файлы, без Cloudflare.
 
 ### Логи Speed test (всегда в logcat)
 
@@ -291,8 +298,9 @@ adb logcat -s SpeedTest
 Запустите **Speed test** в группе серверов. Пример строк:
 
 ```
-SpeedTest: [My VPS] ping=42 ms
-SpeedTest: [My VPS] download status=200 setupMs=800 bodyMs=12000 bytes=52428800 speed=4369066 B/s
+SpeedTest: [My VPS] ping=42 ms via Google (HTTPS)
+SpeedTest: [My VPS] download via Tele2 status=200 setupMs=800 bodyMs=12000 bytes=104857600 speed=4369066 B/s
+SpeedTest: [My VPS] download failed on Tele2 (HTTP 429) — trying fallback…
 ```
 
 ### Внутренние логи NekoBox (`neko.log`)
@@ -331,7 +339,7 @@ adb exec-out run-as moe.nb4a.debug cat cache/neko.log | rg 'SpeedTest|UrlTestDow
 | `Error: NDK not found` | Установить NDK 25.0.8775105, прописать `ANDROID_HOME` / `local.properties` |
 | `gomobile-matsuri: command not found` | `libcore/init.sh`, добавить `$(go env GOPATH)/bin` в `PATH` |
 | Gradle не видит SDK | `local.properties` с `sdk.dir=...` |
-| Speed test показывает 0 / пусто | Проверить сохранённые prefs URL/timeout; URL с `bytes=104857600` даёт HTTP 403 |
+| Speed test показывает 0 / пусто | Проверить сохранённые prefs provider/timeout; смотреть fallback в `adb logcat -s SpeedTest` |
 | Логи Speed test не в logcat | Использовать `adb logcat -s SpeedTest`, не `SagerNet` |
 | `grep -E` падает | На машине `grep` = ripgrep; использовать `rg 'pattern'` |
 

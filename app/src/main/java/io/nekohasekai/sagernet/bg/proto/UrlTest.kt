@@ -1,30 +1,35 @@
 package io.nekohasekai.sagernet.bg.proto
 
+import io.nekohasekai.sagernet.TestEndpoints
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
-import libcore.DownloadRetryListener
 
 class UrlTest(
     private val withDownload: Boolean = false,
-    private val downloadRetryListener: DownloadRetryListener? = null,
+    private val fallbackListener: TestFallbackListener? = null,
 ) {
 
-    val link = DataStore.connectionTestURL
+    private val pingEndpoints = TestEndpoints.orderedConnectionEndpoints(DataStore.connectionTestProvider)
     private val timeout = 5000
 
     suspend fun doTest(profile: ProxyEntity): TestResult {
         return if (withDownload) {
             TestInstance(
                 profile,
-                link,
+                pingEndpoints,
                 timeout,
-                downloadLink = DataStore.speedTestURL,
+                downloadEndpoints = TestEndpoints.orderedSpeedEndpoints(DataStore.speedTestProvider),
                 downloadMaxBytes = DataStore.speedTestMaxBytes,
                 downloadTimeout = DataStore.speedTestTimeout,
-                downloadRetryListener = downloadRetryListener,
+                fallbackListener = fallbackListener,
             ).doTest()
         } else {
-            TestInstance(profile, link, timeout).doTest()
+            TestInstance(
+                profile,
+                pingEndpoints,
+                timeout,
+                fallbackListener = fallbackListener,
+            ).doTest()
         }
     }
 

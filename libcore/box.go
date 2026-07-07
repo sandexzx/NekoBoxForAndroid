@@ -249,7 +249,7 @@ type DownloadRetryListener interface {
 	OnRetry(attempt int32, maxAttempts int32)
 }
 
-const maxDownloadAttempts = 3
+const defaultDownloadAttempts int32 = 3
 
 func downloadRetryDelay(resp *http.Response, attempt int) time.Duration {
 	if ra := resp.Header.Get("Retry-After"); ra != "" {
@@ -263,8 +263,12 @@ func downloadRetryDelay(resp *http.Response, attempt int) time.Duration {
 	return time.Duration(attempt) * time.Second
 }
 
-func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32, listener DownloadRetryListener) (result *DownloadTestResult, err error) {
+func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32, listener DownloadRetryListener, maxAttempts int32) (result *DownloadTestResult, err error) {
 	defer device.DeferPanicToError("box.UrlTestDownload", func(err_ error) { err = err_ })
+
+	if maxAttempts <= 0 {
+		maxAttempts = defaultDownloadAttempts
+	}
 
 	var connectionTracker adapter.ConnectionTracker
 	var httpClient *http.Client
@@ -283,7 +287,7 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32,
 		httpClient = boxapi.CreateProxyHttpClient(nil, nil)
 	}
 
-	for attempt := 1; attempt <= maxDownloadAttempts; attempt++ {
+	for attempt := 1; attempt <= int(maxAttempts); attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
@@ -291,6 +295,7 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32,
 			cancel()
 			return nil, err
 		}
+		req.Header.Set("User-Agent", "NekoBox-Android/1.0 SpeedTest")
 
 		doStart := time.Now()
 		resp, err := httpClient.Do(req)
@@ -305,9 +310,9 @@ func UrlTestDownload(i *BoxInstance, link string, maxBytes int64, timeout int32,
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			cancel()
-			if attempt < maxDownloadAttempts {
+			if attempt < int(maxAttempts) {
 				if listener != nil {
-					listener.OnRetry(int32(attempt), maxDownloadAttempts)
+					listener.OnRetry(int32(attempt), maxAttempts)
 				}
 				time.Sleep(downloadRetryDelay(resp, attempt))
 				continue

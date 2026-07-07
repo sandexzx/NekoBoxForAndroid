@@ -2,8 +2,8 @@ package io.nekohasekai.sagernet.database
 
 import android.os.Binder
 import androidx.preference.PreferenceDataStore
-import io.nekohasekai.sagernet.CONNECTION_TEST_URL
-import io.nekohasekai.sagernet.SPEED_TEST_URL
+import io.nekohasekai.sagernet.TestEndpoints.DEFAULT_CONNECTION_PROVIDER
+import io.nekohasekai.sagernet.TestEndpoints.DEFAULT_SPEED_PROVIDER
 import io.nekohasekai.sagernet.GroupType
 import io.nekohasekai.sagernet.IPv6Mode
 import io.nekohasekai.sagernet.Key
@@ -156,9 +156,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     val persistAcrossReboot by configurationStore.boolean(Key.PERSIST_ACROSS_REBOOT) { false }
 
     var appendHttpProxy by configurationStore.boolean(Key.APPEND_HTTP_PROXY)
-    var connectionTestURL by configurationStore.string(Key.CONNECTION_TEST_URL) { CONNECTION_TEST_URL }
-    var speedTestURL by configurationStore.string(Key.SPEED_TEST_URL) { SPEED_TEST_URL }
-    var speedTestMaxBytes by configurationStore.long(Key.SPEED_TEST_MAX_BYTES) { 50L * 1024 * 1024 }
+    var connectionTestProvider by configurationStore.string(Key.CONNECTION_TEST_PROVIDER) { DEFAULT_CONNECTION_PROVIDER }
+    var speedTestProvider by configurationStore.string(Key.SPEED_TEST_PROVIDER) { DEFAULT_SPEED_PROVIDER }
+    var speedTestMaxBytes by configurationStore.long(Key.SPEED_TEST_MAX_BYTES) { 100L * 1024 * 1024 }
     var speedTestTimeout by configurationStore.int(Key.SPEED_TEST_TIMEOUT) { 8000 }
     var connectionTestConcurrent by configurationStore.int("connectionTestConcurrent") { 5 }
     var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)

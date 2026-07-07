@@ -107,6 +107,10 @@
 <string name="connection_test_timeout">Тайм-аут</string>
 <string name="connection_test_unreachable">Недоступен</string>
 <string name="connection_test_url">URL-адрес проверки подключения</string>
+<string name="connection_test_provider">Провайдер проверки подключения</string>
+<string name="connection_test_provider_summary">Основной эндпоинт для пинга; при сбое — один запасной</string>
+<string name="connection_test_concurrent">Параллельность URL-теста</string>
+<string name="connection_test_concurrent_summary">Число одновременных URL-тестов (по умолчанию 5)</string>
 <string name="connection_test_url_test">URL Тест</string>
 <string name="copy">Копировать</string>
 <string name="copy_toast_msg">Ссылка скопирована в буфер обмена.</string>
